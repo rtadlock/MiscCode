@@ -18,6 +18,10 @@
 
 #define BUTTON_PIN  7    // button to GND, uses INPUT_PULLUP
 
+#define NO_EVENT      0
+#define SINGLE_CLICK  1
+#define DOUBLE_CLICK  2
+
 // See the above linked buttoncycler code for a bit more
 // explanation on setup for your NeoPixel.  I had an old
 // one laying around and had to adjust it to work with that one
@@ -127,7 +131,6 @@ void partyModeTick()
       pixels.setPixelColor(p, 255, 255, 255);  // sparkle white
     }
   }
-
   pixels.show();
 }
 
@@ -231,30 +234,61 @@ void setAll(uint8_t r, uint8_t g, uint8_t b)
   pixels.show();
 }
 
-bool buttonPressedEdge() 
+uint8_t buttonEvent()
 {
-  // simple debounce + edge detect
   static bool lastReading = HIGH;
   static bool debouncedState = HIGH;
   static uint32_t lastChangeMs = 0;
 
+  static uint32_t firstClickTime = 0;
+  static bool waitingForSecondClick = false;
+
+  const uint16_t debounceTime = 25;
+  const uint16_t doubleClickTime = 350;  // max gap between clicks (ms)
+
   bool reading = digitalRead(BUTTON_PIN);
 
-  if (reading != lastReading) 
+  // ---- debounce logic ----
+  if (reading != lastReading)
   {
     lastChangeMs = millis();
     lastReading = reading;
   }
 
-  if ((millis() - lastChangeMs) > 25) 
-  { // debounce time
-    if (reading != debouncedState) 
+  if ((millis() - lastChangeMs) > debounceTime)
+  {
+    if (reading != debouncedState)
     {
       debouncedState = reading;
-      if (debouncedState == LOW) return true; // pressed (to GND)
+
+      // Detect button press (LOW = pressed)
+      if (debouncedState == LOW)
+      {
+        if (waitingForSecondClick)
+        {
+          // Second click detected in time
+          waitingForSecondClick = false;
+          return DOUBLE_CLICK;
+        }
+        else
+        {
+          // First click detected
+          waitingForSecondClick = true;
+          firstClickTime = millis();
+        }
+      }
     }
   }
-  return false;
+
+  // ---- check for single-click timeout ----
+  if (waitingForSecondClick &&
+      (millis() - firstClickTime > doubleClickTime))
+  {
+    waitingForSecondClick = false;
+    return SINGLE_CLICK;
+  }
+
+  return NO_EVENT;
 }
 
 void setup() 
@@ -270,8 +304,12 @@ void setup()
 void loop()
 {
   // Mode toggle
-  if (buttonPressedEdge())
+  uint8_t event = buttonEvent();
+
+  if (event == SINGLE_CLICK)
     mode = (Mode)((mode + 1) % 11);
+  else if (event == DOUBLE_CLICK)
+    mode = MODE_OFF;
 
   // Run current mode
   switch (mode) 
